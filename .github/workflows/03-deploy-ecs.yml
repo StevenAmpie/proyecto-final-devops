@@ -1,0 +1,98 @@
+name: "Pipeline 3 - Despliegue Continuo en Amazon ECS"
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Etiqueta de la imagen a desplegar (por defecto latest)"
+        required: false
+        default: "latest"
+  workflow_run:
+    workflows: ["Pipeline 2 - Construccion y Publicacion en Amazon ECR"]
+    types:
+      - completed
+
+env:
+  AWS_REGION: us-east-1
+  ECS_CLUSTER: devops-task-app-cluster
+  FRONTEND_SERVICE: devops-task-app-frontend-service
+  BACKEND_SERVICE: devops-task-app-backend-service
+  FRONTEND_TASK_FAMILY: devops-task-app-frontend-task
+  BACKEND_TASK_FAMILY: devops-task-app-backend-task
+  ECR_FRONTEND_REPO: devops-task-app-frontend
+  ECR_BACKEND_REPO: devops-task-app-backend
+
+jobs:
+  deploy:
+    name: "Actualizar Servicios ECS y Verificar Salud"
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: "Configurar credenciales de AWS"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: "Iniciar sesion en ECR para obtener URI del registro"
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: "Determinar etiqueta de imagen"
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "TAG=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "TAG=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "Descargar Task Definition actual del Frontend"
+        run: |
+          aws ecs describe-task-definition --task-definition $FRONTEND_TASK_FAMILY --query taskDefinition > frontend-task-def.json
+
+      - name: "Actualizar imagen en Task Definition del Frontend"
+        id: render-frontend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: frontend-task-def.json
+          container-name: frontend
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPO }}:${{ steps.vars.outputs.TAG }}
+
+      - name: "Desplegar nueva version del Frontend en ECS"
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-frontend.outputs.task-definition }}
+          service: ${{ env.FRONTEND_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: "Descargar Task Definition actual del Backend"
+        run: |
+          aws ecs describe-task-definition --task-definition $BACKEND_TASK_FAMILY --query taskDefinition > backend-task-def.json
+
+      - name: "Actualizar imagen en Task Definition del Backend"
+        id: render-backend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: backend-task-def.json
+          container-name: backend
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPO }}:${{ steps.vars.outputs.TAG }}
+
+      - name: "Desplegar nueva version del Backend en ECS"
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-backend.outputs.task-definition }}
+          service: ${{ env.BACKEND_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: "Verificar disponibilidad de la aplicacion en el ALB"
+        run: |
+          ALB_DNS=$(aws elbv2 describe-load-balancers --names devops-task-app-alb --query "LoadBalancers[0].DNSName" --output text)
+          echo "URL de la aplicacion: http://$ALB_DNS"
+          curl -f -s "http://$ALB_DNS/health" > /dev/null
+          curl -f -s "http://$ALB_DNS/api/health" > /dev/null
+          echo "Verificacion exitosa: Frontend y Backend operativos."

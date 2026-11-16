@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gestor de Tareas - AWS ECS</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Gestor de Tareas DevOps</h1>
+      <p class="subtitle">Arquitectura en Contenedores: Amazon ECS + Fargate + ALB</p>
+      <div id="api-status" class="status-badge">Verificando conexion con API...</div>
+    </header>
+
+    <form id="task-form" class="task-form">
+      <input type="text" id="task-input" placeholder="Escribe una nueva tarea..." required>
+      <button type="submit">Agregar</button>
+    </form>
+
+    <ul id="task-list" class="task-list"></ul>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

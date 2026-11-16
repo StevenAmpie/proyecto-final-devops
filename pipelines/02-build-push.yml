@@ -1,0 +1,52 @@
+name: "Pipeline 2 - Construccion y Publicacion en Amazon ECR"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'aplicacion/**'
+
+env:
+  AWS_REGION: us-east-1
+  ECR_FRONTEND_REPO: devops-task-app-frontend
+  ECR_BACKEND_REPO: devops-task-app-backend
+
+jobs:
+  build-and-push:
+    name: "Build y Push de Imagenes Docker a ECR"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Obtener codigo fuente"
+        uses: actions/checkout@v4
+
+      - name: "Configurar credenciales de AWS"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: "Iniciar sesion en Amazon ECR"
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: "Construir, etiquetar y publicar imagen Frontend"
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest ./aplicacion/frontend
+          docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest
+
+      - name: "Construir, etiquetar y publicar imagen Backend"
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_BACKEND_REPO:latest ./aplicacion/backend
+          docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:latest
